@@ -8,16 +8,20 @@
 body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
     overflow-x: hidden;
+    background: #0a0a1a;
 }
 
-/* Hero section styles */
+/* Hero section styles - Three.js background container */
 .hero-section {
-    position: relative;
+    position: fixed;
+    top: 0;
+    left: 0;
     width: 100vw;
     height: 100vh;
     overflow: hidden;
     background: linear-gradient(135deg, #0f0f1f 0%, #0a0a1a 50%, #050510 100%);
     will-change: transform;
+    z-index: 0;
 }
 
 /* Canvas positioning */
@@ -28,43 +32,267 @@ body {
     left: 0;
     width: 100%;
     height: 100%;
-    z-index: 1;
 }
 
-/* Hero content overlay */
-.hero-content {
-    position: relative;
-    z-index: 2;
+/* Header styles */
+.header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    padding: 2rem 3rem;
     display: flex;
-    flex-direction: column;
-    justify-content: center;
+    justify-content: space-between;
     align-items: center;
-    height: 100vh;
-    color: white;
-    text-align: center;
+    z-index: 1000;
     pointer-events: none;
 }
 
-.hero-content h1 {
-    font-size: 4rem;
-    font-weight: 700;
-    margin-bottom: 1rem;
-    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+.header > * {
+    pointer-events: auto;
 }
 
-.hero-content p {
-    font-size: 1.5rem;
+.logo {
+    height: 35px;
+    width: auto;
+    filter: brightness(0) invert(1);
+}
+
+.menu-icon {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    cursor: pointer;
+    width: 30px;
+}
+
+.menu-icon span {
+    display: block;
+    width: 100%;
+    height: 2px;
+    background-color: white;
+    transition: all 0.3s ease;
+}
+
+/* Section base styles */
+.section {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    z-index: 10;
+    padding: 0 3rem;
+}
+
+.section-content {
+    position: relative;
+    width: 100%;
+    max-width: 1400px;
+    margin: 0 auto;
+}
+
+/* Section title styles with Abel font */
+.section-title {
+    font-family: 'Abel', sans-serif;
+    font-size: 5rem;
+    font-weight: 400;
+    line-height: 1.1;
+    color: white;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    margin: 0;
+}
+
+/* Section 1 - Left aligned */
+.section-1 .section-content {
+    display: flex;
+    justify-content: flex-start;
+}
+
+.section-1 .section-title {
+    text-align: left;
+}
+
+/* Section 2 - Right aligned with description box */
+.section-2 .section-content {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+}
+
+.section-2 .section-title {
+    text-align: right;
+    margin-bottom: 3rem;
+}
+
+/* Section 3 - Left aligned with description box */
+.section-3 .section-content {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+}
+
+.section-3 .section-title {
+    text-align: left;
+    margin-bottom: 3rem;
+}
+
+/* Section 4 - Solution Partner section */
+.solution-partner-section .section-content {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    position: relative;
+}
+
+.section-subtitle {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    font-size: 1.3rem;
     font-weight: 300;
-    text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+    color: white;
+    line-height: 1.4;
+    margin-bottom: 1rem;
+}
+
+.solution-partner-section .section-title {
+    margin-bottom: 2rem;
+}
+
+.section-title .accent {
+    color: #ff6b35;
+}
+
+.section-description {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    font-size: 1.3rem;
+    font-weight: 300;
+    color: white;
+    line-height: 1.6;
+    margin-bottom: 2rem;
+}
+
+/* Description boxes */
+.description-box {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 8px;
+    padding: 2rem 2.5rem;
+    backdrop-filter: blur(10px);
+    max-width: 500px;
+}
+
+.description-box p {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    font-size: 1.1rem;
+    font-weight: 300;
+    color: white;
+    line-height: 1.8;
+    margin: 0;
+}
+
+/* CTA Button */
+.cta-button {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    font-size: 1rem;
+    font-weight: 400;
+    color: white;
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid white;
+    border-radius: 4px;
+    padding: 0.9rem 2rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    backdrop-filter: blur(10px);
+    margin-bottom: 3rem;
+}
+
+.cta-button:hover {
+    background: rgba(255, 255, 255, 0.1);
+    transform: translateX(5px);
+}
+
+/* Large logo in section 4 */
+.large-logo {
+    position: absolute;
+    bottom: 3rem;
+    right: 0;
+    width: 500px;
+    height: auto;
+}
+
+.large-logo img {
+    width: 100%;
+    height: auto;
+    opacity: 0.9;
 }
 
 /* Responsive design */
-@media (max-width: 768px) {
-    .hero-content h1 {
-        font-size: 2.5rem;
+@media (max-width: 1200px) {
+    .section-title {
+        font-size: 4rem;
     }
     
-    .hero-content p {
-        font-size: 1.2rem;
+    .large-logo {
+        width: 400px;
+        bottom: 2rem;
+    }
+}
+
+@media (max-width: 768px) {
+    .header {
+        padding: 1.5rem 2rem;
+    }
+    
+    .logo {
+        height: 28px;
+    }
+    
+    .section {
+        padding: 0 2rem;
+    }
+    
+    .section-title {
+        font-size: 2.8rem;
+    }
+    
+    .section-subtitle,
+    .section-description {
+        font-size: 1.1rem;
+    }
+    
+    .description-box {
+        padding: 1.5rem 2rem;
+        max-width: 100%;
+    }
+    
+    .description-box p {
+        font-size: 1rem;
+    }
+    
+    .large-logo {
+        width: 250px;
+        bottom: 1rem;
+        right: 50%;
+        transform: translateX(50%);
+    }
+    
+    .cta-button {
+        font-size: 0.9rem;
+        padding: 0.8rem 1.5rem;
+    }
+}
+
+@media (max-width: 480px) {
+    .section-title {
+        font-size: 2.2rem;
+    }
+    
+    .header {
+        padding: 1rem 1.5rem;
+    }
+    
+    .section {
+        padding: 0 1.5rem;
     }
 }
