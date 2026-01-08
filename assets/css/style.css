@@ -16,6 +16,8 @@ body {
     width: 100vw;
     height: 100vh;
     overflow: hidden;
+    background: linear-gradient(135deg, #0a0a1a 0%, #1a1a2e 50%, #0a0a1a 100%);
+    will-change: transform;
 }
 
 /* Canvas positioning */
