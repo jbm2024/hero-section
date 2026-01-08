@@ -15,12 +15,12 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0a0a1a);
 
 const camera = new THREE.PerspectiveCamera(
-    75,
+    65,
     window.innerWidth / window.innerHeight,
     0.1,
-    1000
+    10000
 );
-camera.position.set(0, 0, 10);
+camera.position.set(0, 0, 8);
 
 const renderer = new THREE.WebGLRenderer({ 
     antialias: true,
@@ -28,7 +28,7 @@ const renderer = new THREE.WebGLRenderer({
     powerPreference: "high-performance"
 });
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 10));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.2;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -46,9 +46,9 @@ composer.addPass(renderPass);
 
 const bloomPass = new UnrealBloomPass(
     new THREE.Vector2(window.innerWidth, window.innerHeight),
-    2.0,  // strength - increased for better glow
-    0.8,  // radius
-    0.6   // threshold
+    6.5,  // strength - increased for 2px line visibility
+    3.2,  // radius - increased for better glow
+    0.6   // threshold - lowered to capture thin lines
 );
 composer.addPass(bloomPass);
 
@@ -66,12 +66,14 @@ const vertexShader = `
     uniform float uPhase;
     uniform float uVerticalOffset;
     uniform vec2 uMouse;
+    uniform float uDirection; // 0.0 = horizontal, 1.0 = diagonal-right, 2.0 = diagonal-left
+    uniform float uCurveType; // 0.0 = gentle, 1.0 = moderate, 2.0 = strong
     
     varying vec2 vUv;
     varying float vProgress;
     varying float vDistanceFromCenter;
     
-    // Noise functions for organic motion
+    // Enhanced noise functions for more organic motion
     float hash(float n) {
         return fract(sin(n) * 43758.5453);
     }
@@ -91,12 +93,18 @@ const vertexShader = `
     float fbm(vec2 p) {
         float value = 0.0;
         float amplitude = 0.5;
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < 4; i++) {
             value += amplitude * noise(p);
             p *= 2.0;
             amplitude *= 0.5;
         }
         return value;
+    }
+    
+    // Smooth thickness variation along curve
+    float getThicknessMultiplier(float progress) {
+        // Slightly thicker in the middle, tapered at ends
+        return 0.7 + 0.3 * sin(progress * 3.14159);
     }
     
     void main() {
@@ -106,24 +114,47 @@ const vertexShader = `
         // Base position
         vec3 pos = position;
         
-        // Horizontal sine wave displacement (gentle vertical undulation)
-        // Use modulo for seamless looping
+        // Calculate curve strength multiplier based on curve type
+        float curveStrengthMult = 1.0 + uCurveType * 0.5; // Stronger curves for higher types
+        
+        // Base wave phase calculation
         float wavePhase = uFrequency * pos.x + uPhase + mod(uTime * uSpeed, 6.28318);
-        float sineWave = sin(wavePhase) * uAmplitude;
+        float sineWave = sin(wavePhase) * uAmplitude * curveStrengthMult;
         
-        // Low-frequency noise modulation for organic motion
+        // Secondary wave varies with curve type
+        float secondaryWave = sin(wavePhase * (1.5 + uCurveType * 0.2) + uTime * uSpeed * 0.5) * uAmplitude * 0.3 * curveStrengthMult;
+        
+        // Enhanced noise modulation
         vec2 noiseCoord = vec2(
-            pos.x * uNoiseScale + uTime * 0.1,
-            pos.y * uNoiseScale + uTime * 0.08
+            pos.x * uNoiseScale + uTime * 0.06,
+            pos.y * uNoiseScale + uTime * 0.04
         );
-        float noiseValue = fbm(noiseCoord) * uNoiseStrength;
+        float noiseValue = fbm(noiseCoord) * uNoiseStrength * curveStrengthMult;
         
-        // Subtle mouse influence (very restrained)
-        float mouseInfluence = length(uMouse) * 0.05;
-        float mouseOffset = sin(wavePhase + atan(uMouse.y, uMouse.x) * 0.1) * mouseInfluence;
+        // Minimal mouse influence
+        float mouseInfluence = length(uMouse) * 0.015;
+        float mouseOffset = sin(wavePhase + atan(uMouse.y, uMouse.x) * 0.05) * mouseInfluence;
         
         // Apply vertical displacement
-        pos.y += sineWave + noiseValue + mouseOffset + uVerticalOffset;
+        float verticalDisplacement = sineWave + secondaryWave + noiseValue + mouseOffset;
+        
+        // Apply directional transformation based on uDirection
+        if (uDirection < 0.5) {
+            // Horizontal (Section 1)
+            pos.y += verticalDisplacement + uVerticalOffset;
+        } else if (uDirection < 1.5) {
+            // Diagonal right (Section 2) - slight x offset based on y displacement
+            pos.y += verticalDisplacement + uVerticalOffset;
+            pos.x += verticalDisplacement * 0.15;
+        } else {
+            // Diagonal left (Section 3) - opposite x offset
+            pos.y += verticalDisplacement + uVerticalOffset;
+            pos.x -= verticalDisplacement * 0.15;
+        }
+        
+        // Apply thickness variation
+        float thicknessMult = getThicknessMultiplier(uv.x);
+        pos.y *= thicknessMult;
         
         // Distance from center for edge falloff
         vDistanceFromCenter = abs(uv.y - 0.5) * 2.0;
@@ -136,33 +167,33 @@ const fragmentShader = `
     uniform float uTime;
     uniform float uOpacity;
     uniform float uColorIntensity;
+    uniform float uVisibility; // Section-based visibility multiplier
     
     varying vec2 vUv;
     varying float vProgress;
     varying float vDistanceFromCenter;
     
-    // Smooth color interpolation
-    // Based on reference: Orange/Peach -> Magenta/Violet -> Blue
+    // Enhanced color interpolation matching SVG reference
+    // Blue -> Violet -> Magenta -> Orange gradient
     vec3 smoothGradient(float t) {
-        // Warm orange/peach -> Magenta -> Violet -> Electric blue
-        vec3 color1 = vec3(0.98, 0.65, 0.40);  // Warm orange/peach
-        vec3 color2 = vec3(0.92, 0.28, 0.60);  // Magenta #ec4899
-        vec3 color3 = vec3(0.55, 0.36, 0.96);  // Violet #8b5cf6
-        vec3 color4 = vec3(0.26, 0.50, 0.85);  // Electric blue
+        // Adjusted colors to match SVG reference more closely
+        vec3 color1 = vec3(0.4, 0.55, 0.92);   // Cool blue (slightly more saturated)
+        vec3 color2 = vec3(0.55, 0.40, 0.95);  // Violet (richer)
+        vec3 color3 = vec3(0.88, 0.35, 0.62);  // Magenta/pink (warmer)
+        vec3 color4 = vec3(1.0, 0.50, 0.32);   // Warm orange (more vibrant)
         
-        // Ultra-smooth interpolation using multiple smoothstep layers
-        // This creates seamless color transitions
-        float t1 = smoothstep(0.0, 0.25, t);
-        float t2 = smoothstep(0.25, 0.50, t);
-        float t3 = smoothstep(0.50, 0.75, t);
-        float t4 = smoothstep(0.75, 1.0, t);
+        // Ultra-smooth interpolation with enhanced transitions
+        float t1 = smoothstep(0.0, 0.3, t);
+        float t2 = smoothstep(0.25, 0.55, t);
+        float t3 = smoothstep(0.5, 0.8, t);
+        float t4 = smoothstep(0.7, 1.0, t);
         
         vec3 color = mix(color1, color2, t1);
         color = mix(color, color3, t2);
         color = mix(color, color4, t3);
         
-        // Additional smoothing pass
-        color = mix(color, mix(color2, color3, 0.5), t4 * 0.3);
+        // Additional smoothing for seamless transitions
+        color = mix(color, mix(color2, color3, 0.5), t4 * 0.25);
         
         return color;
     }
@@ -171,97 +202,170 @@ const fragmentShader = `
         // Smooth gradient along wave length
         vec3 color = smoothGradient(vProgress) * uColorIntensity;
         
-        // Soft feathered edges (smoothstep falloff)
-        // Wider falloff for softer edges
-        float edgeFade = 1.0 - smoothstep(0.0, 0.5, vDistanceFromCenter);
+        // Precise 2px core with enhanced glow
+        // Calculate distance from center line (0.0 = center, 1.0 = edge)
+        float distanceFromCenter = vDistanceFromCenter;
         
-        // Internal light diffusion (volumetric feel)
-        // Create brighter center with exponential falloff
-        float centerIntensity = exp(-vDistanceFromCenter * 2.0);
-        float diffusion = mix(0.5, 1.0, centerIntensity);
+        // Precise 2px core (very sharp falloff in center)
+        float coreWidth = 0.01; // ~2px in normalized UV space
+        float coreMask = 1.0 - smoothstep(0.0, coreWidth, distanceFromCenter);
         
-        // Time-based subtle intensity variation
-        float timeIntensity = 0.85 + 0.15 * sin(uTime * 0.5);
+        // Soft glow around core (for bloom effect)
+        float glowWidth = 0.15;
+        float glowMask = 1.0 - smoothstep(coreWidth, glowWidth, distanceFromCenter);
         
-        // Final alpha with multiple falloff layers
-        float alpha = edgeFade * diffusion * timeIntensity * uOpacity;
+        // Combine core and glow for 2px line with bloom
+        float lineMask = max(coreMask, glowMask * 0.3);
         
-        // Soft glow with exponential falloff
-        alpha = pow(alpha, 0.8);
+        // Enhanced internal light diffusion with stronger center glow
+        float centerIntensity = exp(-distanceFromCenter * 1.5);
+        float diffusion = mix(0.4, 1.0, centerIntensity);
+        
+        // Additional soft glow layer
+        float softGlow = exp(-distanceFromCenter * 0.8);
+        
+        // Slower time-based intensity variation for more graceful pulsing
+        float timeIntensity = 0.88 + 0.12 * sin(uTime * 0.3);
+        
+        // Final alpha with 2px core and enhanced layering
+        float alpha = lineMask * diffusion * timeIntensity * uOpacity;
+        alpha = alpha + (softGlow * 0.2 * uOpacity);
+        
+        // Softer glow curve for more diffused appearance
+        alpha = pow(alpha, 0.75);
+        
+        // Apply section-based visibility
+        alpha *= uVisibility;
+        
+        // Enhance color brightness in center
+        color = color * (1.0 + centerIntensity * 0.3);
         
         gl_FragColor = vec4(color * alpha, alpha);
     }
 `;
 
 // ============================================
-// WAVE BAND GENERATION
+// SEPARATE LINE CONFIGURATIONS PER SECTION
 // ============================================
 
 const waveBands = [];
-const numLayers = 6;
-const wavesPerLayer = 3;
 
-// Layer configuration for parallax
-const layerConfigs = [
-    { zDepth: -2.5, speed: 0.12, opacity: 0.35, colorIntensity: 0.8, amplitude: 0.6, frequency: 0.15 },
-    { zDepth: -1.5, speed: 0.15, opacity: 0.45, colorIntensity: 0.9, amplitude: 0.8, frequency: 0.18 },
-    { zDepth: -0.5, speed: 0.18, opacity: 0.55, colorIntensity: 1.0, amplitude: 1.0, frequency: 0.20 },
-    { zDepth: 0.5, speed: 0.20, opacity: 0.60, colorIntensity: 1.1, amplitude: 1.2, frequency: 0.22 },
-    { zDepth: 1.5, speed: 0.22, opacity: 0.50, colorIntensity: 1.0, amplitude: 1.0, frequency: 0.18 },
-    { zDepth: 2.5, speed: 0.25, opacity: 0.40, colorIntensity: 0.9, amplitude: 0.8, frequency: 0.15 }
-];
+// Calculate 2px in world space
+function calculate2pxHeight() {
+    const viewportHeight = window.innerHeight;
+    const cameraDistance = camera.position.z;
+    const fovRad = (camera.fov * Math.PI) / 180;
+    const worldHeight = (2.0 / viewportHeight) * (cameraDistance * 2.0 * Math.tan(fovRad / 2));
+    return worldHeight;
+}
 
-// Create wave bands
-layerConfigs.forEach((layerConfig, layerIndex) => {
-    for (let waveIndex = 0; waveIndex < wavesPerLayer; waveIndex++) {
-        // Create broad ribbon plane geometry
-        // Wide horizontal bands that span beyond viewport
-        const width = 50; // Extends beyond viewport for infinite feel
-        const height = 2.0; // Broad ribbon surface
-        const widthSegments = 256; // High subdivision for smooth waves
-        const heightSegments = 8; // More vertical segments for better edge falloff
-        
-        const geometry = new THREE.PlaneGeometry(width, height, widthSegments, heightSegments);
-        
-        // Center the geometry
-        geometry.translate(0, 0, 0);
-        
-        // Phase offset for each wave in layer
-        const phaseOffset = (waveIndex / wavesPerLayer) * Math.PI * 2;
-        
-        // Vertical spacing between waves
-        const verticalSpacing = 2.5;
-        const verticalOffset = (waveIndex - (wavesPerLayer - 1) / 2) * verticalSpacing;
-        
-        // Custom shader material
-        const material = new THREE.ShaderMaterial({
-            vertexShader,
-            fragmentShader,
-            uniforms: {
-                uTime: { value: 0 },
-                uSpeed: { value: layerConfig.speed },
-                uAmplitude: { value: layerConfig.amplitude },
-                uFrequency: { value: layerConfig.frequency },
-                uNoiseScale: { value: 0.08 },
-                uNoiseStrength: { value: 0.15 },
-                uPhase: { value: phaseOffset },
-                uVerticalOffset: { value: verticalOffset },
-                uOpacity: { value: layerConfig.opacity },
-                uColorIntensity: { value: layerConfig.colorIntensity },
-                uMouse: { value: new THREE.Vector2(0, 0) }
-            },
-            transparent: true,
-            blending: THREE.AdditiveBlending, // Screen blending for visual fusion
-            depthWrite: false,
-            side: THREE.DoubleSide
-        });
-        
-        const mesh = new THREE.Mesh(geometry, material);
-        mesh.position.z = layerConfig.zDepth;
-        scene.add(mesh);
-        
-        waveBands.push({ mesh, material, layerIndex, waveIndex });
-    }
+// Section 1 Lines - Horizontal flow (Screen-1.svg pattern) - 14 lines
+const section1Lines = Array.from({ length: 14 }, (_, i) => ({
+    sectionIndex: 0,
+    zDepth: -2.0 + (i * 0.3),
+    speed: 0.08 + (i * 0.003),
+    opacity: 0.35 + (i % 3) * 0.05,
+    colorIntensity: 0.8 + (i * 0.01),
+    amplitude: 0.4 + (i * 0.02),
+    frequency: 0.12 + (i * 0.01),
+    height: 0.002, // Will be set to actual 2px
+    verticalOffset: -6.0 + (i * 0.9),
+    direction: 0.0,
+    curveType: 0.0,
+    phaseOffset: i * Math.PI * 0.15
+}));
+
+// Section 2 Lines - Diagonal flow (Screen-2.svg pattern) - 13 lines
+const section2Lines = Array.from({ length: 13 }, (_, i) => ({
+    sectionIndex: 1,
+    zDepth: -1.8 + (i * 0.3),
+    speed: 0.12 + (i * 0.004),
+    opacity: 0.40 + (i % 3) * 0.05,
+    colorIntensity: 0.85 + (i * 0.01),
+    amplitude: 0.6 + (i * 0.03),
+    frequency: 0.15 + (i * 0.012),
+    height: 0.002,
+    verticalOffset: -5.5 + (i * 0.95),
+    direction: 1.0,
+    curveType: 1.0,
+    phaseOffset: i * Math.PI * 0.18
+}));
+
+// Section 3 Lines - Opposite diagonal flow (Screen-3.svg pattern) - 13 lines
+const section3Lines = Array.from({ length: 13 }, (_, i) => ({
+    sectionIndex: 2,
+    zDepth: -1.5 + (i * 0.3),
+    speed: 0.14 + (i * 0.005),
+    opacity: 0.42 + (i % 3) * 0.05,
+    colorIntensity: 0.90 + (i * 0.01),
+    amplitude: 0.7 + (i * 0.035),
+    frequency: 0.18 + (i * 0.014),
+    height: 0.002,
+    verticalOffset: -5.8 + (i * 0.92),
+    direction: 2.0,
+    curveType: 2.0,
+    phaseOffset: i * Math.PI * 0.20
+}));
+
+// Combine all line configurations
+const allLineConfigs = [...section1Lines, ...section2Lines, ...section3Lines];
+
+// Calculate actual 2px height in world space
+const actual2pxHeight = calculate2pxHeight();
+
+// Create separate, distinct wave bands for each section (40 total lines)
+allLineConfigs.forEach((lineConfig, lineIndex) => {
+    // Create ribbon plane geometry with precise 2px height
+    const width = 50; // Extends beyond viewport
+    const height = actual2pxHeight; // Precise 2px in world space
+    const widthSegments = 256; // High subdivision for smooth waves
+    const heightSegments = 2; // Minimal segments for thin 2px line
+    
+    const geometry = new THREE.PlaneGeometry(width, height, widthSegments, heightSegments);
+    
+    // Use phase offset from config
+    const phaseOffset = lineConfig.phaseOffset;
+    
+    // Store line index in config for interpolation
+    const configWithIndex = { ...lineConfig, lineIndex };
+    
+    // Custom shader material with section-specific parameters
+    const material = new THREE.ShaderMaterial({
+        vertexShader,
+        fragmentShader,
+        uniforms: {
+            uTime: { value: 0 },
+            uSpeed: { value: lineConfig.speed },
+            uAmplitude: { value: lineConfig.amplitude },
+            uFrequency: { value: lineConfig.frequency },
+            uNoiseScale: { value: 0.05 }, // Reduced for smoother curves
+            uNoiseStrength: { value: 0.10 }, // Reduced for less randomness
+            uPhase: { value: phaseOffset },
+            uVerticalOffset: { value: lineConfig.verticalOffset },
+            uOpacity: { value: lineConfig.opacity },
+            uColorIntensity: { value: lineConfig.colorIntensity },
+            uMouse: { value: new THREE.Vector2(0, 0) },
+            uDirection: { value: lineConfig.direction },
+            uCurveType: { value: lineConfig.curveType },
+            uVisibility: { value: 1.0 } // Will be updated based on scroll
+        },
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide
+    });
+    
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.z = lineConfig.zDepth;
+    scene.add(mesh);
+    
+    waveBands.push({ 
+        mesh, 
+        material, 
+        sectionIndex: lineConfig.sectionIndex,
+        lineIndex,
+        lineConfig: configWithIndex // Store for interpolation
+    });
 });
 
 // ============================================
@@ -283,7 +387,7 @@ function updateMouse() {
 }
 
 // ============================================
-// SCROLL INTERACTION
+// SCROLL INTERACTION & SECTION DETECTION
 // ============================================
 
 let scrollY = 0;
@@ -296,6 +400,73 @@ window.addEventListener('scroll', () => {
 
 function updateScroll() {
     scrollY += (targetScrollY - scrollY) * scrollSpeed;
+}
+
+// Section detection - determines which section is currently in view
+function getCurrentSection() {
+    const viewportHeight = window.innerHeight;
+    const sectionIndex = Math.floor(scrollY / viewportHeight);
+    return Math.min(sectionIndex, 2); // 0, 1, or 2 for sections 1-3
+}
+
+// Calculate visibility multiplier for lines based on section
+function getSectionVisibility(lineSection) {
+    const currentSection = getCurrentSection();
+    const distance = Math.abs(currentSection - lineSection);
+    
+    if (distance === 0) return 1.0; // Fully visible in current section
+    if (distance === 1) return 0.25; // Slightly visible in adjacent section
+    return 0.0; // Hidden in distant sections
+}
+
+// Smooth easing function (cubic ease-in-out) for Apple-level smoothness
+function smoothEase(t) {
+    return t < 0.5 
+        ? 4 * t * t * t 
+        : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+// Get scroll progress within current section (0.0 to 1.0)
+function getSectionProgress() {
+    const viewportHeight = window.innerHeight;
+    const sectionProgress = (scrollY % viewportHeight) / viewportHeight;
+    return sectionProgress;
+}
+
+// Get interpolation factor between sections
+function getInterpolationFactor() {
+    const viewportHeight = window.innerHeight;
+    const currentSection = getCurrentSection();
+    const sectionProgress = (scrollY % viewportHeight) / viewportHeight;
+    
+    // Smooth transition zone in last 30% of section
+    if (sectionProgress > 0.7 && currentSection < 2) {
+        const transitionProgress = (sectionProgress - 0.7) / 0.3;
+        return smoothEase(transitionProgress);
+    }
+    return 0.0;
+}
+
+// Interpolate line parameters between sections
+function getInterpolatedParams(lineConfig, currentSection, interpolationFactor) {
+    if (interpolationFactor === 0.0) {
+        return lineConfig; // No interpolation needed
+    }
+    
+    const nextSection = currentSection + 1;
+    const nextSectionConfigs = nextSection === 1 ? section2Lines : section3Lines;
+    const nextConfig = nextSectionConfigs[lineConfig.lineIndex % nextSectionConfigs.length];
+    
+    // Interpolate all parameters smoothly
+    return {
+        ...lineConfig,
+        speed: lineConfig.speed + (nextConfig.speed - lineConfig.speed) * interpolationFactor,
+        amplitude: lineConfig.amplitude + (nextConfig.amplitude - lineConfig.amplitude) * interpolationFactor,
+        frequency: lineConfig.frequency + (nextConfig.frequency - lineConfig.frequency) * interpolationFactor,
+        direction: lineConfig.direction + (nextConfig.direction - lineConfig.direction) * interpolationFactor,
+        curveType: lineConfig.curveType + (nextConfig.curveType - lineConfig.curveType) * interpolationFactor,
+        opacity: lineConfig.opacity + (nextConfig.opacity - lineConfig.opacity) * interpolationFactor * 0.5
+    };
 }
 
 // ============================================
@@ -318,19 +489,43 @@ function animate() {
     // Scroll influence (very subtle)
     const scrollInfluence = 1.0 + (scrollY * 0.00005);
     
-    // Update all wave bands
+    // Update all wave bands with interpolated parameters and visibility
+    const currentSection = getCurrentSection();
+    const interpolationFactor = getInterpolationFactor();
+    
     waveBands.forEach((waveBand) => {
         const uniforms = waveBand.material.uniforms;
+        
+        // Get interpolated parameters for smooth transitions
+        const interpolatedParams = getInterpolatedParams(
+            waveBand.lineConfig,
+            currentSection,
+            interpolationFactor
+        );
         
         // Update time with scroll influence
         uniforms.uTime.value = time * scrollInfluence;
         
+        // Update parameters with interpolated values
+        uniforms.uSpeed.value = interpolatedParams.speed;
+        uniforms.uAmplitude.value = interpolatedParams.amplitude;
+        uniforms.uFrequency.value = interpolatedParams.frequency;
+        uniforms.uDirection.value = interpolatedParams.direction;
+        uniforms.uCurveType.value = interpolatedParams.curveType;
+        uniforms.uOpacity.value = interpolatedParams.opacity;
+        uniforms.uColorIntensity.value = interpolatedParams.colorIntensity;
+        
         // Update mouse position (very restrained)
         uniforms.uMouse.value.copy(mouse);
+        
+        // Apply section-based visibility - smooth transition
+        const targetVisibility = getSectionVisibility(waveBand.sectionIndex);
+        const currentVisibility = uniforms.uVisibility.value;
+        uniforms.uVisibility.value += (targetVisibility - currentVisibility) * 0.08;
     });
     
-    // Subtle bloom variation
-    bloomPass.strength = 2.0 + Math.sin(time * 0.2) * 0.2;
+    // Subtle bloom variation with slower, more graceful pulsing
+    bloomPass.strength = 3.5 + Math.sin(time * 0.15) * 0.4;
     
     // Render with post-processing
     composer.render();
@@ -349,6 +544,15 @@ function handleResize() {
     
     composer.setSize(window.innerWidth, window.innerHeight);
     bloomPass.setSize(window.innerWidth, window.innerHeight);
+    
+    // Recalculate 2px height on resize and update all geometries
+    const new2pxHeight = calculate2pxHeight();
+    waveBands.forEach((waveBand) => {
+        const geometry = waveBand.mesh.geometry;
+        geometry.dispose();
+        const newGeometry = new THREE.PlaneGeometry(50, new2pxHeight, 256, 2);
+        waveBand.mesh.geometry = newGeometry;
+    });
 }
 
 window.addEventListener('resize', handleResize);
