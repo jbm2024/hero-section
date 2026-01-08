@@ -1,5 +1,5 @@
-// Advanced Three.js Light Trails Animation
-// Senior motion designer implementation with custom shaders and post-processing
+// Smooth Light-Wave Bands Animation
+// Horizontally-dominant ribbon surfaces creating continuous wave fields
 
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
@@ -11,7 +11,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 // ============================================
 
 const scene = new THREE.Scene();
-// Deep navy-to-black gradient background
+// Deep navy-to-black gradient background (matches CSS)
 scene.background = new THREE.Color(0x0a0a1a);
 
 const camera = new THREE.PerspectiveCamera(
@@ -46,117 +46,32 @@ composer.addPass(renderPass);
 
 const bloomPass = new UnrealBloomPass(
     new THREE.Vector2(window.innerWidth, window.innerHeight),
-    1.5,  // strength
-    0.5,  // radius
-    0.8   // threshold
+    2.0,  // strength - increased for better glow
+    0.8,  // radius
+    0.6   // threshold
 );
 composer.addPass(bloomPass);
 
 // ============================================
-// NOISE FUNCTION (Simplex-like)
-// ============================================
-
-function hash(n) {
-    return fract(sin(n) * 43758.5453);
-}
-
-function fract(x) {
-    return x - Math.floor(x);
-}
-
-function noise(p) {
-    const i = Math.floor(p);
-    const f = fract(p);
-    const u = f * f * (3.0 - 2.0 * f);
-    return mix(hash(i), hash(i + 1.0), u);
-}
-
-function mix(a, b, t) {
-    return a + (b - a) * t;
-}
-
-function snoise2D(v) {
-    const C = new THREE.Vector4(
-        0.211324865405187,
-        0.366025403784439,
-        -0.577350269189626,
-        0.024390243902439
-    );
-    const i = new THREE.Vector2(
-        Math.floor(v.x + v.x * C.x + v.y * C.y),
-        Math.floor(v.y + v.x * C.x + v.y * C.y)
-    );
-    const x0 = new THREE.Vector2(
-        v.x - (i.x - (i.x + i.y) * C.x),
-        v.y - (i.y - (i.x + i.y) * C.y)
-    );
-    const i1 = x0.x > x0.y ? new THREE.Vector2(1.0, 0.0) : new THREE.Vector2(0.0, 1.0);
-    const x12 = new THREE.Vector4(
-        x0.x + C.x - i1.x,
-        x0.y + C.y - i1.y,
-        x0.x + C.z,
-        x0.y + C.w
-    );
-    
-    i.x = i.x % 289.0;
-    i.y = i.y % 289.0;
-    
-    const p = new THREE.Vector3(
-        hash(i.x + hash(i.y)),
-        hash(i.x + i1.x + hash(i.y + i1.y)),
-        hash(i.x + 1.0 + hash(i.y + 1.0))
-    );
-    
-    const m = Math.max(0.5 - new THREE.Vector3(
-        x0.x * x0.x + x0.y * x0.y,
-        x12.x * x12.x + x12.y * x12.y,
-        x12.z * x12.z + x12.w * x12.w
-    ).dot(new THREE.Vector3(1, 1, 1)), 0.0);
-    
-    m = m * m;
-    return 105.0 * Math.pow(m, 4) * (
-        p.x * (x0.x * x0.x + x0.y * x0.y) +
-        p.y * (x12.x * x12.x + x12.y * x12.y) +
-        p.z * (x12.z * x12.z + x12.w * x12.w)
-    );
-}
-
-// Simplified 2D noise for JavaScript
-function simpleNoise2D(x, y) {
-    const n = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
-    return (n - Math.floor(n)) * 2.0 - 1.0;
-}
-
-function fbm(x, y, octaves = 4) {
-    let value = 0.0;
-    let amplitude = 0.5;
-    let frequency = 1.0;
-    
-    for (let i = 0; i < octaves; i++) {
-        value += amplitude * simpleNoise2D(x * frequency, y * frequency);
-        amplitude *= 0.5;
-        frequency *= 2.0;
-    }
-    
-    return value;
-}
-
-// ============================================
-// CUSTOM SHADER MATERIAL
+// CUSTOM SHADER MATERIAL FOR WAVE BANDS
 // ============================================
 
 const vertexShader = `
     uniform float uTime;
     uniform float uSpeed;
+    uniform float uAmplitude;
+    uniform float uFrequency;
     uniform float uNoiseScale;
     uniform float uNoiseStrength;
-    uniform float uThickness;
+    uniform float uPhase;
+    uniform float uVerticalOffset;
+    uniform vec2 uMouse;
     
     varying vec2 vUv;
     varying float vProgress;
-    varying float vIntensity;
+    varying float vDistanceFromCenter;
     
-    // Simplified fbm for vertex shader
+    // Noise functions for organic motion
     float hash(float n) {
         return fract(sin(n) * 43758.5453);
     }
@@ -176,7 +91,7 @@ const vertexShader = `
     float fbm(vec2 p) {
         float value = 0.0;
         float amplitude = 0.5;
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < 3; i++) {
             value += amplitude * noise(p);
             p *= 2.0;
             amplitude *= 0.5;
@@ -186,26 +101,32 @@ const vertexShader = `
     
     void main() {
         vUv = uv;
-        vProgress = uv.x; // Use UV.x as progress along curve
+        vProgress = uv.x; // Progress along wave length
         
-        // Noise-based offset for organic motion
+        // Base position
+        vec3 pos = position;
+        
+        // Horizontal sine wave displacement (gentle vertical undulation)
+        // Use modulo for seamless looping
+        float wavePhase = uFrequency * pos.x + uPhase + mod(uTime * uSpeed, 6.28318);
+        float sineWave = sin(wavePhase) * uAmplitude;
+        
+        // Low-frequency noise modulation for organic motion
         vec2 noiseCoord = vec2(
-            position.x * uNoiseScale + uTime * 0.3,
-            position.y * uNoiseScale + uTime * 0.2
+            pos.x * uNoiseScale + uTime * 0.1,
+            pos.y * uNoiseScale + uTime * 0.08
         );
         float noiseValue = fbm(noiseCoord) * uNoiseStrength;
         
-        // Time-based sine wave for smooth motion
-        float timeOffset = sin(uTime * 0.5 + vProgress * 2.0) * 0.1;
+        // Subtle mouse influence (very restrained)
+        float mouseInfluence = length(uMouse) * 0.05;
+        float mouseOffset = sin(wavePhase + atan(uMouse.y, uMouse.x) * 0.1) * mouseInfluence;
         
-        vec3 pos = position;
-        pos.xy += vec2(noiseValue, timeOffset);
+        // Apply vertical displacement
+        pos.y += sineWave + noiseValue + mouseOffset + uVerticalOffset;
         
-        // Thickness variation
-        vec3 n = normalize(normal);
-        pos += n * uThickness * (0.8 + 0.4 * sin(uTime + vProgress * 3.0));
-        
-        vIntensity = 0.7 + 0.3 * sin(uTime * 1.5 + vProgress * 4.0);
+        // Distance from center for edge falloff
+        vDistanceFromCenter = abs(uv.y - 0.5) * 2.0;
         
         gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
     }
@@ -213,123 +134,152 @@ const vertexShader = `
 
 const fragmentShader = `
     uniform float uTime;
+    uniform float uOpacity;
+    uniform float uColorIntensity;
     
     varying vec2 vUv;
     varying float vProgress;
-    varying float vIntensity;
+    varying float vDistanceFromCenter;
+    
+    // Smooth color interpolation
+    // Based on reference: Orange/Peach -> Magenta/Violet -> Blue
+    vec3 smoothGradient(float t) {
+        // Warm orange/peach -> Magenta -> Violet -> Electric blue
+        vec3 color1 = vec3(0.98, 0.65, 0.40);  // Warm orange/peach
+        vec3 color2 = vec3(0.92, 0.28, 0.60);  // Magenta #ec4899
+        vec3 color3 = vec3(0.55, 0.36, 0.96);  // Violet #8b5cf6
+        vec3 color4 = vec3(0.26, 0.50, 0.85);  // Electric blue
+        
+        // Ultra-smooth interpolation using multiple smoothstep layers
+        // This creates seamless color transitions
+        float t1 = smoothstep(0.0, 0.25, t);
+        float t2 = smoothstep(0.25, 0.50, t);
+        float t3 = smoothstep(0.50, 0.75, t);
+        float t4 = smoothstep(0.75, 1.0, t);
+        
+        vec3 color = mix(color1, color2, t1);
+        color = mix(color, color3, t2);
+        color = mix(color, color4, t3);
+        
+        // Additional smoothing pass
+        color = mix(color, mix(color2, color3, 0.5), t4 * 0.3);
+        
+        return color;
+    }
     
     void main() {
-        // Gradient color interpolation along curve
-        // Blue -> Violet -> Magenta -> Orange
-        vec3 color1 = vec3(0.26, 0.35, 0.58);  // Electric blue
-        vec3 color2 = vec3(0.55, 0.36, 0.96); // Violet
-        vec3 color3 = vec3(0.92, 0.28, 0.60); // Magenta
-        vec3 color4 = vec3(0.98, 0.58, 0.24); // Warm orange
+        // Smooth gradient along wave length
+        vec3 color = smoothGradient(vProgress) * uColorIntensity;
         
-        float t = vProgress;
+        // Soft feathered edges (smoothstep falloff)
+        // Wider falloff for softer edges
+        float edgeFade = 1.0 - smoothstep(0.0, 0.5, vDistanceFromCenter);
         
-        vec3 color;
-        if (t < 0.33) {
-            color = mix(color1, color2, t * 3.0);
-        } else if (t < 0.66) {
-            color = mix(color2, color3, (t - 0.33) * 3.0);
-        } else {
-            color = mix(color3, color4, (t - 0.66) * 3.0);
-        }
+        // Internal light diffusion (volumetric feel)
+        // Create brighter center with exponential falloff
+        float centerIntensity = exp(-vDistanceFromCenter * 2.0);
+        float diffusion = mix(0.5, 1.0, centerIntensity);
         
-        // Soft alpha falloff at edges
-        float edgeFade = 1.0 - abs(vUv.y - 0.5) * 2.0;
-        edgeFade = smoothstep(0.0, 0.3, edgeFade);
+        // Time-based subtle intensity variation
+        float timeIntensity = 0.85 + 0.15 * sin(uTime * 0.5);
         
-        // Time-based intensity variation
-        float timeIntensity = 0.8 + 0.2 * sin(uTime * 0.8);
+        // Final alpha with multiple falloff layers
+        float alpha = edgeFade * diffusion * timeIntensity * uOpacity;
         
-        // Final color with additive blending
-        float alpha = edgeFade * vIntensity * timeIntensity * 0.9;
+        // Soft glow with exponential falloff
+        alpha = pow(alpha, 0.8);
+        
         gl_FragColor = vec4(color * alpha, alpha);
     }
 `;
 
 // ============================================
-// CURVE GENERATION SYSTEM
+// WAVE BAND GENERATION
 // ============================================
 
-function createCurve(index, totalCurves) {
-    const points = [];
-    const numPoints = 8;
-    
-    // Diagonal flow from top-right to bottom-left
-    const startX = 8 + (index * 0.5);
-    const startY = 6 - (index * 0.3);
-    const endX = -8 - (index * 0.5);
-    const endY = -6 + (index * 0.3);
-    
-    // Create control points for smooth curve
-    for (let i = 0; i <= numPoints; i++) {
-        const t = i / numPoints;
-        const x = THREE.MathUtils.lerp(startX, endX, t);
-        const y = THREE.MathUtils.lerp(startY, endY, t);
+const waveBands = [];
+const numLayers = 6;
+const wavesPerLayer = 3;
+
+// Layer configuration for parallax
+const layerConfigs = [
+    { zDepth: -2.5, speed: 0.12, opacity: 0.35, colorIntensity: 0.8, amplitude: 0.6, frequency: 0.15 },
+    { zDepth: -1.5, speed: 0.15, opacity: 0.45, colorIntensity: 0.9, amplitude: 0.8, frequency: 0.18 },
+    { zDepth: -0.5, speed: 0.18, opacity: 0.55, colorIntensity: 1.0, amplitude: 1.0, frequency: 0.20 },
+    { zDepth: 0.5, speed: 0.20, opacity: 0.60, colorIntensity: 1.1, amplitude: 1.2, frequency: 0.22 },
+    { zDepth: 1.5, speed: 0.22, opacity: 0.50, colorIntensity: 1.0, amplitude: 1.0, frequency: 0.18 },
+    { zDepth: 2.5, speed: 0.25, opacity: 0.40, colorIntensity: 0.9, amplitude: 0.8, frequency: 0.15 }
+];
+
+// Create wave bands
+layerConfigs.forEach((layerConfig, layerIndex) => {
+    for (let waveIndex = 0; waveIndex < wavesPerLayer; waveIndex++) {
+        // Create broad ribbon plane geometry
+        // Wide horizontal bands that span beyond viewport
+        const width = 50; // Extends beyond viewport for infinite feel
+        const height = 2.0; // Broad ribbon surface
+        const widthSegments = 256; // High subdivision for smooth waves
+        const heightSegments = 8; // More vertical segments for better edge falloff
         
-        // Add curve variation with sine waves
-        const curveAmplitude = 2.0 + index * 0.5;
-        const curveFreq = 2.0 + index * 0.3;
-        const offsetX = Math.sin(t * Math.PI * curveFreq) * curveAmplitude;
-        const offsetY = Math.cos(t * Math.PI * curveFreq * 0.7) * curveAmplitude * 0.6;
+        const geometry = new THREE.PlaneGeometry(width, height, widthSegments, heightSegments);
         
-        // Z depth for parallax (different layers)
-        const zDepth = (index - totalCurves / 2) * 0.8;
+        // Center the geometry
+        geometry.translate(0, 0, 0);
         
-        points.push(new THREE.Vector3(
-            x + offsetX,
-            y + offsetY,
-            zDepth
-        ));
+        // Phase offset for each wave in layer
+        const phaseOffset = (waveIndex / wavesPerLayer) * Math.PI * 2;
+        
+        // Vertical spacing between waves
+        const verticalSpacing = 2.5;
+        const verticalOffset = (waveIndex - (wavesPerLayer - 1) / 2) * verticalSpacing;
+        
+        // Custom shader material
+        const material = new THREE.ShaderMaterial({
+            vertexShader,
+            fragmentShader,
+            uniforms: {
+                uTime: { value: 0 },
+                uSpeed: { value: layerConfig.speed },
+                uAmplitude: { value: layerConfig.amplitude },
+                uFrequency: { value: layerConfig.frequency },
+                uNoiseScale: { value: 0.08 },
+                uNoiseStrength: { value: 0.15 },
+                uPhase: { value: phaseOffset },
+                uVerticalOffset: { value: verticalOffset },
+                uOpacity: { value: layerConfig.opacity },
+                uColorIntensity: { value: layerConfig.colorIntensity },
+                uMouse: { value: new THREE.Vector2(0, 0) }
+            },
+            transparent: true,
+            blending: THREE.AdditiveBlending, // Screen blending for visual fusion
+            depthWrite: false,
+            side: THREE.DoubleSide
+        });
+        
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.position.z = layerConfig.zDepth;
+        scene.add(mesh);
+        
+        waveBands.push({ mesh, material, layerIndex, waveIndex });
     }
-    
-    // Create Catmull-Rom spline curve
-    const curve = new THREE.CatmullRomCurve3(points, false, 'centripetal');
-    return curve;
-}
+});
 
 // ============================================
-// CREATE LIGHT TRAIL MESHES
+// MOUSE INTERACTION (Minimal)
 // ============================================
 
-const curves = [];
-const meshes = [];
-const numCurves = 7;
+const mouse = new THREE.Vector2(0, 0);
+let targetMouse = new THREE.Vector2(0, 0);
 
-for (let i = 0; i < numCurves; i++) {
-    const curve = createCurve(i, numCurves);
-    curves.push(curve);
-    
-    // Tube geometry with varying radius
-    const radius = 0.02 + (i * 0.008);
-    const segments = 128;
-    const radialSegments = 8;
-    
-    const geometry = new THREE.TubeGeometry(curve, segments, radius, radialSegments, false);
-    
-    // Custom shader material
-    const material = new THREE.ShaderMaterial({
-        vertexShader,
-        fragmentShader,
-        uniforms: {
-            uTime: { value: 0 },
-            uSpeed: { value: 0.5 + i * 0.1 },
-            uNoiseScale: { value: 0.15 + i * 0.05 },
-            uNoiseStrength: { value: 0.3 + i * 0.1 },
-            uThickness: { value: radius }
-        },
-        transparent: true,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        side: THREE.DoubleSide
-    });
-    
-    const mesh = new THREE.Mesh(geometry, material);
-    scene.add(mesh);
-    meshes.push({ mesh, curve, material });
+window.addEventListener('mousemove', (event) => {
+    // Normalize mouse position to -1 to 1 range
+    targetMouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+    targetMouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+});
+
+// Smooth mouse interpolation
+function updateMouse() {
+    mouse.lerp(targetMouse, 0.05);
 }
 
 // ============================================
@@ -344,7 +294,6 @@ window.addEventListener('scroll', () => {
     targetScrollY = window.scrollY;
 });
 
-// Smooth scroll interpolation
 function updateScroll() {
     scrollY += (targetScrollY - scrollY) * scrollSpeed;
 }
@@ -362,64 +311,26 @@ function animate() {
     const deltaTime = clock.getDelta();
     time += deltaTime;
     
-    // Update scroll
+    // Update interactions
+    updateMouse();
     updateScroll();
     
-    // Scroll influence on animation
-    const scrollInfluence = 1.0 + (scrollY * 0.0001);
-    const scrollIntensity = 1.0 + (scrollY * 0.00005);
+    // Scroll influence (very subtle)
+    const scrollInfluence = 1.0 + (scrollY * 0.00005);
     
-    // Update each curve mesh
-    meshes.forEach((item, index) => {
-        // Update shader uniforms for shader-based animation (every frame)
-        item.material.uniforms.uTime.value = time * scrollInfluence;
-        item.material.uniforms.uSpeed.value = (0.5 + index * 0.1) * scrollInfluence;
-        item.material.uniforms.uNoiseStrength.value = (0.3 + index * 0.1) * scrollIntensity;
+    // Update all wave bands
+    waveBands.forEach((waveBand) => {
+        const uniforms = waveBand.material.uniforms;
         
-        // Curve point animation (update geometry every 3 frames for performance)
-        const frameCount = Math.floor(time * 60);
-        if (frameCount % 3 === 0) {
-            const curve = item.curve;
-            const points = curve.points;
-            
-            points.forEach((point, pIndex) => {
-                // Store original position on first frame
-                if (!point.userData.originalX) {
-                    point.userData.originalX = point.x;
-                    point.userData.originalY = point.y;
-                }
-                
-                const baseX = point.userData.originalX;
-                const baseY = point.userData.originalY;
-                
-                const noiseX = fbm(
-                    baseX * 0.1 + time * 0.2,
-                    baseY * 0.1 + time * 0.15
-                ) * 0.25 * scrollIntensity;
-                const noiseY = fbm(
-                    baseX * 0.12 + time * 0.18,
-                    baseY * 0.12 + time * 0.2
-                ) * 0.25 * scrollIntensity;
-                
-                const sineOffset = Math.sin(time * 0.5 + pIndex * 0.5) * 0.2;
-                const cosineOffset = Math.cos(time * 0.4 + pIndex * 0.6) * 0.15;
-                
-                point.x = baseX + noiseX + sineOffset;
-                point.y = baseY + noiseY + cosineOffset;
-            });
-            
-            // Update curve and regenerate geometry
-            curve.updateArcLengths();
-            
-            const radius = 0.02 + (index * 0.008);
-            const newGeometry = new THREE.TubeGeometry(curve, 128, radius, 8, false);
-            item.mesh.geometry.dispose();
-            item.mesh.geometry = newGeometry;
-        }
+        // Update time with scroll influence
+        uniforms.uTime.value = time * scrollInfluence;
+        
+        // Update mouse position (very restrained)
+        uniforms.uMouse.value.copy(mouse);
     });
     
-    // Update post-processing
-    bloomPass.strength = 1.5 + Math.sin(time * 0.3) * 0.3;
+    // Subtle bloom variation
+    bloomPass.strength = 2.0 + Math.sin(time * 0.2) * 0.2;
     
     // Render with post-processing
     composer.render();
